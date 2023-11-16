@@ -1,0 +1,546 @@
+---
+title: "Modeling Earnings"
+author: "Gayla Hess and Vanessa Cox"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyr')
+library(ggplot2)
+library(GGally)
+library(ggpubr)
+library(HistData)
+library(dplyr)
+library(stringr)
+library(pwr)
+library(effectsize)
+library(lsr)
+library(car)
+library(olsrr)
+```
+
+
+## Reading the data
+```{r}
+pay_data <- read.delim("earnings.txt", header = TRUE)
+#summary(pay_data)
+head(pay_data)
+```
+
+
+## Sorting Data
+Some of the data provided for this earnings study is redundant or unneeded in the review of overall earnings. The precise school name and location (city) will not be a meaningful metric as these are numerous. Examining location by state or region will show a better overall trend. The data includes three columns of standardized test data: SAT, ACT, and a combination of SAT and ACT. The SAT.ACT column is a string which shows SAT and ACT scores, and this repeated information is dropped from the table. 
+```{r Wrangling Data}
+
+# separate City and State by commas, the code "pay_data = pay_data %>% separate(Place, c("City", "State"))" caused problems for cities composed of multiple words
+pay_data[c('City', 'State')] <- str_split_fixed(pay_data$Place, ',', 2)
+
+# change how public/private is displayed 
+pay_data$Public[pay_data$Public==0]<-"No"
+pay_data$Public[pay_data$Public==1]<-"Yes"
+
+
+# create a variable to store regions with corresponding states
+regions <- list(
+  West = c("WA", "OR", "CA", "NV", "AZ", "ID", "MT", "WY",
+          "CO", "NM", "UT", "HI"),
+  South = c("TX", "OK", "AR", "LA", "MS", "AL", "TN", "KY",
+           "GA", "FL", "SC", "NC", "VA", "WV"),
+  Midwest = c("KS", "NE", "SD", "ND", "MN", "MO", "IA", "IL",
+             "IN", "MI", "WI", "OH"),
+  Northeast = c("ME", "NH", "NY", "MA", "RI", "VT", "PA", 
+              "NJ", "CT", "DE", "MD", "DC")
+)
+
+# get rid of space in State column
+pay_data$State<-str_replace_all(pay_data$State, fixed(" "), "")
+
+# add column for region grouped by US region associated with different states
+pay_data$Region <- sapply(pay_data$State, function(x) names(regions)[grep(x,regions)])
+
+# drop unnecessary columns
+cols.drop = c(1,2,4,12)
+
+# drop unnecessary columns
+cols.drop = c(1,2,10,12,13)
+data<-pay_data[,-cols.drop] #- means everything except cols.drop (defined above as 1, 2, 4, 12)
+
+# display head
+head(data)
+```
+
+
+
+# Perform a two sample test to compare the earnings of individuals who attend private vs public institutions.
+
+```{r}
+public_earnings<-data$Earn[data$Public=="Yes"]
+private_earnings<-data$Earn[data$Public=="No"]
+
+head(public_earnings)
+## Assess for normality in private and public earnings data
+
+# first look at normality: histograms
+hist(private_earnings)
+hist(public_earnings)
+
+# ggqqplots
+ggqqplot(public_earnings) # tails deviate from normality
+ggqqplot(private_earnings) # strong deviation in tail from normality
+
+# Shapiro test
+shapiro.test(public_earnings) # reject null hypothesis of normally distributed data
+shapiro.test(private_earnings) # reject null hypothesis of normally distributed data
+
+# Number of observations
+length(private_earnings) # 438 observations
+length(public_earnings) # 268 observations
+
+# Let's check for equal variances
+var.test(private_earnings, public_earnings) # variances are not equal
+
+
+```
+
+# Explain how you chose the statistical test to compare the two populations of private cs public institutions.
+After running multiple visualizations and tests on both the private and public earnings data, I've come to the conclusion that both are not normally distributed nor are their variances equal. However, we have 268 observations of public school earnings and 438 observations of private school earnings, so running a Welch's t-test is acceptable.
+
+```{r}
+# Welch's T-Test:
+t.test(private_earnings, public_earnings, var.equal = FALSE)
+```
+# Perform a power analysis of the statistical method you used to compare the two populations, and explain how you chose the parameters in your power analysis.
+
+## Effect Size calculation
+
+The choice of standard deviation in the equation depends on your research design. You can use:
+
+-a pooled standard deviation that is based on data from both groups,
+-the standard deviation from a control group, if your design includes a control and an experimental group,
+-the standard deviation from the pretest data, if your repeated measures design includes a pretest and posttest.
+
+We will be using a pooled standard deviation.
+```{r}
+# Calculating pooled standard deviation:
+
+# standard dev of each sample
+sd_private<-sd(private_earnings)
+sd_public<-sd(public_earnings)
+
+# number of observations in each sample
+n_private<-length(private_earnings)
+n_public<-length(public_earnings)
+
+# calculate pooled standard deviation
+pooled <- sqrt(((n_private-1)*sd_private^2 + (n_public-1)*sd_public^2) / (n_private+n_public-2))
+
+# pooled standard deviation
+pooled
+
+# same answer using package
+sd_pooled(private_earnings, public_earnings)
+
+# mean of each sample
+mu1<-mean(private_earnings)
+mu2<-mean(public_earnings)
+mu1
+mu2
+
+# calculate effect size
+d_calculated<-abs((mu1-mu2)/pooled)
+d<-cohensD(private_earnings, public_earnings)
+
+d
+head(data)
+
+pwr.t2n.test(n1=n_private, n2=n_public, d=d, sig.level = 0.05, power=NULL, alternative = "two.sided")
+?pwr.t2n.test
+
+ggplot(data=data, aes(x=Earn, color=Public)) + geom_histogram()
+```
+## Power Analysis
+We performed a power analysis of the statistical method we used to compare public/private earnings. The values for n1 and n2 are the sizes of the two populations, private (n1=438) and public (n2=268). The effect size was calculated using a pooled standard deviation and was double checked using the cohensD() function (d=0.02671961). The significance level we set at 0.05. We then ran the calculated power=0.06366854. This interprets as having a 6% chance of rejecting the null hypothesis when the null hypothesis is false or a 94% chance of a Type II error. After reviewing the density plot of earnings and the public variable, we've concluded the low power calculation is due to the distributions of both populations being overlaid.
+
+
+# Remove the variables school and place, and generate a new variable which is the state the school is located in. Explain why it makes sense to remove the variable school.
+We removed the variables school and place during the beginning data cleaning steps of our project. Ultimately, we got rid of the state variable as well and replaced it with 1 of 4 U.S. geographic regions: West, South, Midwest, or Northeast. The variables school, place, and even state, created too many unique factors to statistically assess for earning disparities. We are attempting to create a predictive model for earnings, school, place, and state are too specific of variables to consider. 
+
+# Explain why a regression is more powerful than simply comparing two populations.
+The Welch's T-Test we performed helped determine if there was a significant difference in means of our two populations, whereas a regression can be much more insightful. Regressions create predictive models and describe how strong the relationship between dependent and independent variables are. Furthermore, comparing two populations is more limited than regression. Regression models can describe complex relationships and control for confounding variables.
+
+
+# Start by exploring the data with exploratory graphs, and consider transformations to make relationships linear. Explain your reasoning in exploring transformations, and also explore relationships between both numerical and non-numerical data.
+
+
+# The following assess relationship between earnings and log/squareroot/inverse transformed independent variables price, price.with.aid, pct.need, and merit.aided.
+```{r}
+# Log transform all data
+head(data)
+log_data<-select(data, -c(6,7,8,9))
+log_data<-dplyr::mutate_each(log_data, funs=log,
+                             log_earn=Earn,
+                             log_price=Price,
+                             log_pw_aid=Price.with.aid,
+                             log_pct_need=Pct.need,
+                             log_merit_aided=merit.aided)
+head(log_data)
+attach(log_data)
+log_model1<-lm(Earn~log_price, data=log_data)
+log_model2<-lm(Earn~log_pw_aid, data=log_data)
+log_model3<-lm(Earn~log_pct_need, data=log_data)
+log_model4<-lm(Earn~log_merit_aided, data=log_data)
+log_model5<-lm(log_earn~Price, data=log_data)
+log_model6<-lm(log_earn~Price.with.aid, data=log_data)
+log_model7<-lm(log_earn~Pct.need, data=log_data)
+log_model8<-lm(log_earn~merit.aided, data=log_data)
+summary(log_model1)
+summary(log_model2)
+summary(log_model3)
+summary(log_model4)
+summary(log_model5)
+summary(log_model6)
+summary(log_model7)
+summary(log_model8)
+
+# Squareroot transform all data
+sqrt_data<-select(data, -c(6,7,8,9))
+sqrt_data<-dplyr::mutate_each(sqrt_data, funs = sqrt,
+                              sqrt_earn=Earn,
+                              sqrt_price=Price,
+                              sqrt_pw_aid=Price.with.aid,
+                              sqrt_pct_need=Pct.need,
+                              sqrt_merit_aided=merit.aided)
+head(sqrt_data)
+attach(sqrt_data)
+sqrt_model1<-lm(Earn~sqrt_price, data=sqrt_data)
+sqrt_model2<-lm(Earn~sqrt_pw_aid, data=sqrt_data)
+sqrt_model3<-lm(Earn~sqrt_pct_need, data=sqrt_data)
+sqrt_model4<-lm(Earn~sqrt_merit_aided, data=sqrt_data)
+sqrt_model5<-lm(sqrt_earn~Price, data=sqrt_data)
+sqrt_model6<-lm(sqrt_earn~Price.with.aid, data=sqrt_data)
+sqrt_model7<-lm(sqrt_earn~Pct.need, data=sqrt_data)
+sqrt_model8<-lm(sqrt_earn~merit.aided, data=sqrt_data)
+summary(sqrt_model1)
+summary(sqrt_model2)
+summary(sqrt_model3)
+summary(sqrt_model4)
+summary(sqrt_model5)
+summary(sqrt_model6)
+summary(sqrt_model7)
+summary(sqrt_model8)
+
+r_p = function(x) 1 / x
+rec_data<-select(data, -c(6,7,8,9))
+rec_data<-dplyr::mutate_each(rec_data, funs = r_p,
+                             rec_earn=Earn,
+                             rec_price=Price,
+                             rec_pw_aid=Price.with.aid,
+                             rec_pct_need=Pct.need,
+                             rec_merit_aided=merit.aided)
+rec_model1<-lm(Earn~rec_price, data=rec_data)
+rec_model2<-lm(Earn~rec_pw_aid, data=rec_data)
+rec_model3<-lm(Earn~rec_pct_need, data=rec_data)
+rec_model4<-lm(Earn~rec_merit_aided, data=rec_data)
+rec_model5<-lm(rec_earn~Price, data=rec_data)
+rec_model6<-lm(rec_earn~Price.with.aid, data=rec_data)
+rec_model7<-lm(rec_earn~Pct.need, data=rec_data)
+comprec_model7<-lm(Earn~Pct.need, data=data)
+rec_model8<-lm(rec_earn~merit.aided, data=rec_data)
+summary(rec_model1)
+summary(rec_model2)
+summary(rec_model3)
+summary(rec_model4)
+summary(rec_model5)
+summary(rec_model6)
+summary(rec_model7)
+summary(comprec_model7)
+summary(rec_model8)
+
+```
+# Exploratory Graphs
+```{r plotting1}
+ggpairs(data)
+#Scatter plot
+ggplot(data , aes(x=SAT, y= Earn)) + geom_point(color = 'black')
+#Scatter plot with regression line
+ggplot(data , aes(x=SAT, y= Earn)) + geom_point(color = 'black') + geom_smooth(method=lm,  linetype="dashed", se = FALSE,
+             color="darkred", fill="blue")
+#Shape/color/size according to private or public
+ggplot(data , aes(x=SAT, y= Earn, shape = Public, color = Public, size = Public)) + geom_point()
+
+#Comparing two populations with a categorical input
+#Box-plots
+ggplot(data, aes(x=Public, y=Earn)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+
+ggplot(data, aes(x=Region, y=Earn)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+
+#Histograms
+ggplot(data, aes(x=Earn, fill = Public, color = Public)) +
+  geom_histogram()
+
+ggplot(data, aes(x=Earn, fill = Region, color = Region)) +
+  geom_histogram()
+
+#Density plots
+ggplot(data, aes(Earn, fill=Public)) + 
+  geom_density(alpha=.5) + 
+  scale_fill_manual(values = c('#999999','#E69F00')) + 
+  theme(legend.position = c(0,1))
+
+
+```
+
+
+# Let's look at relationships between numerical and non-numerical data.
+```{r}
+# Box plots
+reg_pub_df<-data.frame(data$Region, data$Public)
+attach(reg_pub_df)
+ggplot(reg_pub_df, aes(data.Region, ..count..)) + geom_bar(aes(fill = data.Public), position = "dodge")
+       
+       
+# maybe we just keep this one here and keep earn~public boxplot in exploratory
+ggplot(data, aes(x=Region, y=Earn)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+
+#Histograms
+# keep this one down here
+ggplot(data, aes(x=Earn, fill = Region, color = Region)) +
+  geom_histogram()
+```
+Looking at the box plot of Regions vs. Earnings the means seem about the same, however the variances differ by region with the most variation appearing in the West. Another test that may be insightful for our data is a ANOVA to statistically compare earnings of the various U.S. regions.
+
+
+# Discuss at least two different model building methods for regression
+
+## Stepwise Regression
+
+Stepwise either adds the most significant variable or removes the least significant variable. It does not consider all possible models, and it produces a single regression model when the algorithm ends.
+
+Forward vs. Backward Model Selection
+
+### Forward Stepwise Selection:
+1. Begins with a model that contains no variables (null model)
+2. Then starts adding most significant variables one after the other.
+3. Stops once pre-specified stopping rule is reached or until all the variables under consideration are included in the model
+
+## Backward Stepwise Selection (or backward elimination):
+1. Begins with a model that contains all variables under consideration (full model)
+2. Then starts removing the least significant variables one after the other
+3. Stops once pre-specified stopping rule is reached or until no variable is left in the model
+
+Pros of forward stepwise:
+-Can be used when number of variables under consideration is very large
+
+Pros of backward stepwise:
+-Has the advantage of considering effects of all variables simultaneously
+-Important in case of collinearity (variables in model are correlated with each other)
+
+## Best Subsets Regression
+
+Best subsets regression is also known as “all possible regressions” and “all possible models.” Best subsets regression fits all possible models based on the independent variables specified. It fits all possible models with every combination and number of independent variables possible. After fitting all the models, best subsets regression displays the best fitting models for every number of independent variable. For example, we have 7 independent variables in our dataset, so it would display the best fitting model with one variable, two variables, all way up to seven variables. Usually, either adjusted R-squared or Mallows’ Cp is the criterion for picking the best fitting models for this process.
+
+# Explain the meaning of two way interaction terms.
+Regression models take independent variables and establish a relationship with dependent variables which helps create predictive models. A simple linear regression can be seen as y = b0 + b1x1 where "b1" represents how much of an effect the independent variable "x1" has on the outcome and also in what direction (+/-). Having multiple independent variables would look like y = b0 + b1x1 + b2x2 + b3x3 and so on. However, independent variables don't always act independently of each other and that interaction can create a significant impact on the outcome. A real life, intuitive example of this is the effect of diet and exercise on weight loss. A regression model can be created to quantify the effects of diet and exercise on weight loss which can be simply modeled as weight_lost = b0 + b1(diet) + b2(exercise). However, the combined effect of diet and exercise has a unique contribution to weight loss apart from diet and exercise separately. This is modeled as weight_lost = b0 + b1(diet) + b2(exercise) + b3(diet*exercise). The multiplicative variable is called the interaction term. Specifically in this case it is a two-way interaction term because there are two independent variables, however there are higher ordered interaction terms with more than two independent variables.
+
+
+# Explain why you did or did not include transformed variables.
+After log, root, and inverse transforming the independent and dependent variables separately and assessing for a significant linear relationship, we found none of the transformations contributed to a more significant linear relationship compared to the un-transformed variables.
+
+# Begin by building your best model to predict earnings, but without the variables school, place, or public. Use two different methods to produce your model(s). What are your model(s), and explain the meaning of each model
+
+```{r}
+
+# backward stepwise
+
+fullmodel <- lm(Earn~(.-Public), data=data)
+summary(fullmodel)
+backward_model <- lm(Earn~(.-Public-Price.with.aid-merit.aided-SAT), data=data)
+summary(backward_model)
+backward_model <- lm(Earn~(.-Public-Price.with.aid-merit.aided-SAT-Price), data=data)
+summary(backward_model)
+
+model_interaction_terms <- lm(Earn~(.-Public-Price.with.aid-merit.aided-SAT)^2, data = data)
+summary(model_interaction_terms)
+
+backward_model <- lm(Earn~(.-Public-Price.with.aid-merit.aided-SAT-Price+Pct.need:ACT), data=data)
+summary(backward_model)
+
+
+
+#forward stepwise
+
+# intercept-only model
+nullmodel<-lm(Earn ~ 1, data=na.omit(data))
+head(data)
+# all variables included in model
+all <- lm(Earn~(.-Public-SAT), data=na.omit(data))
+step(nullmodel, direction="forward", scope=formula(all))
+
+
+
+# interaction terms
+model_interactionterms = lm(Earn~(.-Price.with.aid-merit.aided-SAT)^2, data = data)
+summary(model_interactionterms)
+# asteriks represent significant data
+
+
+#Forward regression using AIC values
+
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+FWDfit.aic <- ols_step_forward_aic(model, progress = TRUE)
+
+ols_step_forward_aic(model)
+
+FWDfit.aic
+
+#Backward regression using AIC values
+
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+BWDfit.aic <- ols_step_backward_aic(model, progress = TRUE)
+
+BWDfit.aic
+
+```
+
+## Forward Stepwise Regression Using P-Values
+The forward stepwise regression begins with the null model and subsequently adds statistically significant independent variables, those with $p\leq0.05$ until there are no more significant variables. The significant variables selected by this model were: ACT, Pct.need, and Region. This resulted in the following linear model:
+$Earn=27756.61+887.67(ACT)-94.47(Pct.need)+2174.85(RegionNortheast)-742.74(RegionSouth)+2910.92(RegionWest)$
+
+```{r}
+#Forward regression using p-values
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+# to be added to model, p-value must be <=0.05
+FWDfit.p <- ols_step_forward_p(model, penter = 0.05, details = TRUE)
+
+FWDfit.p
+
+```
+
+## Backward Stepwise Regression Using P-Values
+The backward stepwise regression begins with the full model and subsequently removes statistically insignificant independent variables, those with $p\gt0.05$ until there are no more insignificant variables. The backward stepwise function produced the same significant variables as the forward stepwise regression did, resulting in the same linear model:
+$Earn=27756.61+887.67(ACT)-94.47(Pct.need)+2174.85(RegionNortheast)-742.74(RegionSouth)+2910.92(RegionWest)$
+
+
+```{r}
+#Backward regression using p-values
+
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+# to be removed from model, p-value must be >=0.05
+BWDfit.p <- ols_step_backward_p(model, prem = 0.05, progress = TRUE)
+
+BWDfit.p
+bwd_model<-lm(Earn~(ACT+Pct.need+Region), data=data)
+```
+
+## Stepwise Regression Using P-Values
+The stepwise regression combines both forward and backward stepwise techniques. Independent variables are both added and eliminated based on the chosen p-value (0.05). This accounts for the changes in p-values that occur as the model is being built. For example, an independent variable may have a significantly low p-value to start, but as the model changes it may become probabilistically insignificant. The stepwise regression produced same linear model as the forward and backward stepwise method:
+$Earn=27756.61+887.67(ACT)-94.47(Pct.need)+2174.85(RegionNortheast)-742.74(RegionSouth)+2910.92(RegionWest)$
+
+```{r}
+#Stepwise regression using p-values
+
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+# combines both forward and backward
+Bothfit.p <- ols_step_both_p(model, pent = 0.05, prem = 0.05, progress = TRUE)
+
+Bothfit.p
+
+stepwise_model<-lm(Earn~(ACT+Pct.need+Region), data=data)
+stepwise_model
+```
+
+## Best Subsets Regression
+This model produces the best models for all number of independent variables based on the metric chosen by the modeler, in this case we chose AIC. The Akaike Information Criterion (AIC) is a mathematical method for evaluating how well a model fits the data it was generated from. It's calculated from the number of independent variables in the model and how well the model reproduces the data (MLE of model). If a model is more than 2 AIC units lower than another, then it is considered significantly better than that model. The lowest AIC in the Best Subsets Regression for our model is the 6 predictor model (AIC=12751.6655). However, this is a model where we keep all independent variables and is overfitted. The next 2 best models are the best 3-predictor (Pct.need, ACT, Region) and 5-predictor (Price, Price.with.aid, Pct.need, ACT, Region) models. The AIC's for both these models are close enough to be considered about the same in terms of being the best model. We will talk more about this when the final model is discussed.
+
+```{r}
+#Best subsets regression
+model <- lm(Earn~(.-Public-SAT), data=data)
+
+modcompare <- ols_step_best_subset(model, metric="aic")
+
+modcompare
+
+plot(modcompare)
+```
+
+# How many different models (without interaction and transformation) can be produced?
+
+$\sum_ {i=1}^ {7} \binom{7}{k_{i}}$
+
+$=\binom{7}{1}+\binom{7}{2}+\binom{7}{3}+\binom{7}{4}+\binom{7}{5}+\binom{7}{6}+\binom{7}{7}$
+
+$=\frac{7!}{(7-1)!1!} + \frac{7!}{(7-2)!2!} + \frac{7!}{(7-3)!3!} + \frac{7!}{(7-4)!4!} + \frac{7!}{(7-5)!5!} + \frac{7!}{(7-6)!6!} + \frac{7!}{(7-7)!7!}$
+
+$=127$
+
+# What is the probability at least one variable not important for regression has been included in the model. Feel free to make any simplifying assumptins.
+
+$$\left(1-0.7012\right)\cdot\left(1-2e^{-16}\right)\cdot\left(1-3.5e^{-5}\right)\cdot\left(1-9.38e^{-5}\right)\cdot\left(1-0.0254\right)\cdot\left(1-2.69e^{-5}\right)\cdot\left(1-2.07e^{-7}\right)=0.26105$$
+
+# Select a final model and assess the model assumptions.
+Based on the best subsets regression, we have two models to choose from. We have the best 3-predictor model that contains the independent variables Pct.need, ACT, and Region, and the best 5-predictor model that contains the independent variables Price, Price.with.aid, Pct.need, ACT, Region. Ultimately, after cross referencing the two models given by the best subsets regression, and the three models given by the forward stepwise, backward stepwise, and combined stepwise regression, we have concluded the best model for our data is the 3-predictor model with the variables Pct.need, ACT, and Region. The model is given by: 
+$Earn=27756.61+887.67(ACT)-94.47(Pct.need)+2174.85(RegionNortheast)-742.74(RegionSouth)+2910.92(RegionWest)$
+The model assumptions are linearity, independence, homoscedasticity, and normality. In our exploratory period and experimentation with transformations, we've deemed our independent and dependent variables to be linearly related. The assumption of independence comes from an understanding of our data.  removed the variable SAT from our data as it was collinear with ACT. Perhaps one could argue against independence between some observations, however, ultimately we've concluded our observations are independent.
+
+```{r}
+model <- lm(Earn~+ACT+Pct.need+Region, data=data)
+AIC(model)
+model <- lm(Earn~+ACT+Pct.need+Region+Pct.need:ACT, data=data)
+# recalculate metric (aic or bic or whatever we choose)
+AIC(model)
+summary(model)
+
+# Assumptions
+
+# Linearity
+# Linearity assumption addressed during exploratory period and with transformations
+
+# Independence
+plot(model)
+
+
+# Homoscedasity
+# get list of residuals
+res <- resid(model)
+#produce residual vs. fitted plot
+plot(fitted(model), res) + abline(0,0)
+
+# Normality
+ggqqplot(res)
+#create Q-Q plot for residuals
+qqnorm(res)
+#add a straight diagonal line to the plot
+qqline(res) 
+#Create density plot of residuals
+plot(density(res))
+shapiro.test(res)
+
+```
+$Earn=27756.61+887.67(ACT)-94.47(Pct.need)+2174.85(RegionNortheast)-742.74(RegionSouth)+2910.92(RegionWest)-19.83(ACT*Pct.need)$
+# Add the variable public to your final regression model. Assess the impact and importance of the variable to the regression model.
+```{r}
+final_model <- lm(Earn~+ACT+Pct.need+Region+Pct.need:ACT+Public, data=data)
+AIC(final_model)
+summary(model)
+summary(final_model)
+confint(final_model)
+```
+# Explain the logic of adding the variable public to the regression model as the last step.
+Statistically the hardest for the variable to be significant. Looking at all other variables to explain difference.
+$Earnings = -3663.71 + 2100.97(ACT) + 428.48(Pct.need) + 1992.05(RegionNortheast) - 1366.11(RegionSouth) + 2629.94(RegionWest) + 1382.28(PublicYes) - 20.69(ACT*Pct.need)$
