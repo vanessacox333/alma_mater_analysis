@@ -6,7 +6,7 @@
 
 #### Specific questions:
 
--Perform a two sample test to compare the earnings of individuals who attend private vs public institutions.
+-Perform a two sample test to compare the earnings of individuals who attend private vs public institutions. <br />
 -Explain how you chose the statistical test to compare the two populations of private cs public institutions.
 -Perform a power analysis of the statistical method you used to compare the two populations, and explain how you chose the parameters in your power analysis.
 -Remove the variables school and place, and generate a new variable which is the state the school is located in. Explain why it makes sense to remove the variable school.
